@@ -4,10 +4,7 @@ import logging
 import os
 from pathlib import Path
 import json
-from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
-
-import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +22,8 @@ from tradingagents.agents.utils.agent_states import (
     RiskDebateState,
 )
 from tradingagents.dataflows.config import set_config
+from tradingagents.instruments import resolve_instrument
+from tradingagents.returns import fetch_returns
 
 # Import the new abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
@@ -191,40 +190,7 @@ class TradingAgentsGraph:
     def _fetch_returns(
         self, ticker: str, trade_date: str, holding_days: int = 5
     ) -> Tuple[Optional[float], Optional[float], Optional[int]]:
-        """Fetch raw and alpha return for ticker over holding_days from trade_date.
-
-        Returns (raw_return, alpha_return, actual_holding_days) or
-        (None, None, None) if price data is unavailable (too recent, delisted,
-        or network error).
-        """
-        try:
-            start = datetime.strptime(trade_date, "%Y-%m-%d")
-            end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
-            end_str = end.strftime("%Y-%m-%d")
-
-            stock = yf.Ticker(ticker).history(start=trade_date, end=end_str)
-            spy = yf.Ticker("SPY").history(start=trade_date, end=end_str)
-
-            if len(stock) < 2 or len(spy) < 2:
-                return None, None, None
-
-            actual_days = min(holding_days, len(stock) - 1, len(spy) - 1)
-            raw = float(
-                (stock["Close"].iloc[actual_days] - stock["Close"].iloc[0])
-                / stock["Close"].iloc[0]
-            )
-            spy_ret = float(
-                (spy["Close"].iloc[actual_days] - spy["Close"].iloc[0])
-                / spy["Close"].iloc[0]
-            )
-            alpha = raw - spy_ret
-            return raw, alpha, actual_days
-        except Exception as e:
-            logger.warning(
-                "Could not resolve outcome for %s on %s (will retry next run): %s",
-                ticker, trade_date, e,
-            )
-            return None, None, None
+        return fetch_returns(ticker, trade_date, getattr(self, "config", DEFAULT_CONFIG), holding_days)
 
     def _resolve_pending_entries(self, ticker: str) -> None:
         """Resolve pending log entries for ticker at the start of a new run.
@@ -269,49 +235,51 @@ class TradingAgentsGraph:
         with a per-ticker SqliteSaver so a crashed run can resume from the last
         successful node on a subsequent invocation with the same ticker+date.
         """
-        self.ticker = company_name
+        instrument = resolve_instrument(company_name, self.config)
+        self.ticker = instrument.safe_storage_key
 
         # Resolve any pending memory-log entries for this ticker before the pipeline runs.
-        self._resolve_pending_entries(company_name)
+        self._resolve_pending_entries(instrument.safe_storage_key)
 
         # Recompile with a checkpointer if the user opted in.
         if self.config.get("checkpoint_enabled"):
             self._checkpointer_ctx = get_checkpointer(
-                self.config["data_cache_dir"], company_name
+                self.config["data_cache_dir"], instrument.safe_storage_key
             )
             saver = self._checkpointer_ctx.__enter__()
             self.graph = self.workflow.compile(checkpointer=saver)
 
             step = checkpoint_step(
-                self.config["data_cache_dir"], company_name, str(trade_date)
+                self.config["data_cache_dir"], instrument.safe_storage_key, str(trade_date)
             )
             if step is not None:
                 logger.info(
-                    "Resuming from step %d for %s on %s", step, company_name, trade_date
+                    "Resuming from step %d for %s on %s", step, instrument.safe_storage_key, trade_date
                 )
             else:
-                logger.info("Starting fresh for %s on %s", company_name, trade_date)
+                logger.info("Starting fresh for %s on %s", instrument.safe_storage_key, trade_date)
 
         try:
-            return self._run_graph(company_name, trade_date)
+            return self._run_graph(instrument.identifier, trade_date, instrument.to_state())
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
 
-    def _run_graph(self, company_name, trade_date):
+    def _run_graph(self, company_name, trade_date, instrument=None):
         """Execute the graph and write the resulting state to disk and memory log."""
         # Initialize state — inject memory log context for PM.
-        past_context = self.memory_log.get_past_context(company_name)
+        memory_key = (instrument or {}).get("safe_storage_key", company_name)
+        past_context = self.memory_log.get_past_context(memory_key)
         init_agent_state = self.propagator.create_initial_state(
-            company_name, trade_date, past_context=past_context
+            company_name, trade_date, past_context=past_context, instrument=instrument
         )
         args = self.propagator.get_graph_args()
 
         # Inject thread_id so same ticker+date resumes, different date starts fresh.
         if self.config.get("checkpoint_enabled"):
-            tid = thread_id(company_name, str(trade_date))
+            tid = thread_id(memory_key, str(trade_date))
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
         if self.debug:
@@ -334,7 +302,7 @@ class TradingAgentsGraph:
 
         # Store decision for deferred reflection on the next same-ticker run.
         self.memory_log.store_decision(
-            ticker=company_name,
+            ticker=memory_key,
             trade_date=trade_date,
             final_trade_decision=final_state["final_trade_decision"],
         )
@@ -342,7 +310,7 @@ class TradingAgentsGraph:
         # Clear checkpoint on successful completion to avoid stale state.
         if self.config.get("checkpoint_enabled"):
             clear_checkpoint(
-                self.config["data_cache_dir"], company_name, str(trade_date)
+                self.config["data_cache_dir"], memory_key, str(trade_date)
             )
 
         return final_state, self.process_signal(final_state["final_trade_decision"])
