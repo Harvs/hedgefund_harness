@@ -23,6 +23,11 @@ from .alpha_vantage import (
     get_global_news as get_alpha_vantage_global_news,
 )
 from .alpha_vantage_common import AlphaVantageRateLimitError
+from .coingecko import (
+    get_crypto_ohlcv_data,
+    get_crypto_indicators_window,
+    get_crypto_tokenomics,
+)
 
 # Configuration and routing logic
 from .config import get_config
@@ -63,6 +68,7 @@ TOOLS_CATEGORIES = {
 VENDOR_LIST = [
     "yfinance",
     "alpha_vantage",
+    "coingecko",
 ]
 
 # Mapping of methods to their vendor-specific implementations
@@ -71,16 +77,19 @@ VENDOR_METHODS = {
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
+        "coingecko": get_crypto_ohlcv_data,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
+        "coingecko": get_crypto_indicators_window,
     },
     # fundamental_data
     "get_fundamentals": {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
+        "coingecko": get_crypto_tokenomics,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
@@ -134,7 +143,16 @@ def get_vendor(category: str, method: str = None) -> str:
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
     category = get_category_for_method(method)
-    vendor_config = get_vendor(category, method)
+    config = get_config()
+    crypto_method = config.get("asset_class") == "crypto" and method in {
+        "get_stock_data",
+        "get_indicators",
+        "get_fundamentals",
+    }
+    if crypto_method:
+        vendor_config = config.get("crypto_data_vendor", "coingecko")
+    else:
+        vendor_config = get_vendor(category, method)
     primary_vendors = [v.strip() for v in vendor_config.split(',')]
 
     if method not in VENDOR_METHODS:
@@ -143,9 +161,10 @@ def route_to_vendor(method: str, *args, **kwargs):
     # Build fallback chain: primary vendors first, then remaining available vendors
     all_available_vendors = list(VENDOR_METHODS[method].keys())
     fallback_vendors = primary_vendors.copy()
-    for vendor in all_available_vendors:
-        if vendor not in fallback_vendors:
-            fallback_vendors.append(vendor)
+    if not crypto_method:
+        for vendor in all_available_vendors:
+            if vendor not in fallback_vendors:
+                fallback_vendors.append(vendor)
 
     for vendor in fallback_vendors:
         if vendor not in VENDOR_METHODS[method]:

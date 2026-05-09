@@ -35,6 +35,11 @@ DEFAULT_CONFIG = {
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
+    "asset_class": "equity",
+    "crypto_data_vendor": "coingecko",
+    "crypto_quote_currency": "usd",
+    "crypto_benchmark_coin_id": "bitcoin",
+    "coingecko_api_key": os.getenv("COINGECKO_API_KEY"),
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {
