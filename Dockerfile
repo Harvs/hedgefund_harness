@@ -25,3 +25,9 @@ WORKDIR /home/appuser/app
 COPY --from=builder --chown=appuser:appuser /build .
 
 ENTRYPOINT ["tradingagents"]
+
+FROM builder AS test
+
+RUN pip install --no-cache-dir pytest
+
+ENTRYPOINT ["python", "-m", "pytest"]

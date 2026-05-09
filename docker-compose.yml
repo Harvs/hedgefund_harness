@@ -8,6 +8,20 @@ services:
     tty: true
     stdin_open: true
 
+  tests:
+    build:
+      context: .
+      target: test
+    environment:
+      - TRADINGAGENTS_CACHE_DIR=/tmp/tradingagents-cache
+      - TRADINGAGENTS_RESULTS_DIR=/tmp/tradingagents-results
+      - TRADINGAGENTS_MEMORY_LOG_PATH=/tmp/tradingagents-memory/trading_memory.md
+    volumes:
+      - .:/build
+    working_dir: /build
+    profiles:
+      - test
+
   ollama:
     image: ollama/ollama:latest
     volumes:
