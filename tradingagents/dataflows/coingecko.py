@@ -73,9 +73,16 @@ def load_crypto_ohlcv(coin_id: str, curr_date: str) -> pd.DataFrame:
     safe_coin = safe_ticker_component(f"crypto-{coin_id}", max_len=128)
     curr_dt = pd.to_datetime(curr_date)
     today = pd.Timestamp.today().normalize()
-    start_dt = today - pd.DateOffset(years=5)
+    earliest_public_dt = today - pd.DateOffset(days=364)
+    if curr_dt < earliest_public_dt:
+        raise CoinGeckoDataError(
+            f"CoinGecko public API only supports crypto historical data within the past 365 days. "
+            f"Use a trade date on or after {earliest_public_dt.strftime('%Y-%m-%d')} or configure a paid CoinGecko plan."
+        )
+    start_dt = max(curr_dt - pd.DateOffset(days=364), earliest_public_dt)
+    end_dt = min(curr_dt, today)
     start_str = start_dt.strftime("%Y-%m-%d")
-    end_str = today.strftime("%Y-%m-%d")
+    end_str = end_dt.strftime("%Y-%m-%d")
     os.makedirs(config["data_cache_dir"], exist_ok=True)
     data_file = os.path.join(config["data_cache_dir"], f"{safe_coin}-CoinGecko-{quote_currency}-{start_str}-{end_str}.csv")
     if os.path.exists(data_file):
@@ -104,7 +111,10 @@ def get_crypto_ohlcv_data(
     coin_id = validate_coingecko_id(coin_id)
     datetime.strptime(start_date, "%Y-%m-%d")
     datetime.strptime(end_date, "%Y-%m-%d")
-    data = load_crypto_ohlcv(coin_id, end_date)
+    try:
+        data = load_crypto_ohlcv(coin_id, end_date)
+    except CoinGeckoDataError as exc:
+        return f"CoinGecko OHLCV data unavailable for '{coin_id}': {exc}"
     mask = (data["Date"] >= pd.to_datetime(start_date)) & (data["Date"] <= pd.to_datetime(end_date))
     filtered = data.loc[mask].copy()
     if filtered.empty:
@@ -123,7 +133,10 @@ def get_crypto_indicators_window(
     curr_date: Annotated[str, "The current trading date you are trading on, YYYY-mm-dd"],
     look_back_days: Annotated[int, "how many days to look back"],
 ) -> str:
-    data = load_crypto_ohlcv(coin_id, curr_date)
+    try:
+        data = load_crypto_ohlcv(coin_id, curr_date)
+    except CoinGeckoDataError as exc:
+        return f"CoinGecko technical indicator data unavailable for '{coin_id}': {exc}"
     df = wrap(data.copy())
     df["Date"] = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d")
     try:
