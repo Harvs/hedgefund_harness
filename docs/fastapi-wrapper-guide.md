@@ -378,6 +378,13 @@ Also consider stripping HTML and limiting each item length before passing to the
 
 ## API Docker Service
 
+Published app image:
+
+```text
+192.168.0.8:5000/hedgefund-harness:0.2.5
+192.168.0.8:5000/hedgefund-harness:latest
+```
+
 Add a FastAPI dependency to `pyproject.toml`:
 
 ```toml
@@ -389,9 +396,7 @@ Then add a Compose service:
 
 ```yaml
   tradingagents-api:
-    build:
-      context: .
-      target: app
+    image: 192.168.0.8:5000/hedgefund-harness:0.2.5
     env_file:
       - .env
     environment:
@@ -403,6 +408,14 @@ Then add a Compose service:
     ports:
       - "8000:8000"
     command: ["uvicorn", "tradingagents.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+For local development, replace `image:` with:
+
+```yaml
+    build:
+      context: .
+      target: app
 ```
 
 Because the Dockerfile currently uses an `ENTRYPOINT ["tradingagents"]`, the API service may need either:
