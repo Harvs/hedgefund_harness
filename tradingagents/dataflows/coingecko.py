@@ -146,7 +146,9 @@ def get_crypto_indicators_window(
     curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     before = curr_dt - timedelta(days=look_back_days)
     rows = df[(pd.to_datetime(df["Date"]) >= before) & (pd.to_datetime(df["Date"]) <= curr_dt)][["Date", indicator]]
-    return f"## {indicator} values for {coin_id}\n\n" + rows.to_markdown(index=False)
+    lines = [f"## {indicator} values for {coin_id}", "", "| Date | Value |", "|---|---|"]
+    lines.extend(f"| {row['Date']} | {row[indicator]} |" for _, row in rows.iterrows())
+    return "\n".join(lines)
 
 
 def get_crypto_tokenomics(
