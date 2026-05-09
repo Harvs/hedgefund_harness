@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
 from tradingagents.agents.utils.agent_utils import (
+    build_external_context_instruction,
     build_instrument_context,
     get_language_instruction,
 )
@@ -31,6 +32,7 @@ def create_portfolio_manager(llm):
         risk_debate_state = state["risk_debate_state"]
         research_plan = state["investment_plan"]
         trader_plan = state["trader_investment_plan"]
+        external_context = build_external_context_instruction(state.get("external_context", ""))
 
         past_context = state.get("past_context", "")
         lessons_line = (
@@ -56,6 +58,7 @@ def create_portfolio_manager(llm):
 - Research Manager's investment plan: **{research_plan}**
 - Trader's transaction proposal: **{trader_plan}**
 {lessons_line}
+{external_context}
 **Risk Analysts Debate History:**
 {history}
 

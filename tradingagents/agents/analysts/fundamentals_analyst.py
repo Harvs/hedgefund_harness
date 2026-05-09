@@ -1,5 +1,6 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
+    build_external_context_instruction,
     build_instrument_context,
     get_balance_sheet,
     get_cashflow,
@@ -15,6 +16,7 @@ def create_fundamentals_analyst(llm):
     def fundamentals_analyst_node(state):
         current_date = state["trade_date"]
         instrument_context = build_instrument_context(state["company_of_interest"])
+        external_context = build_external_context_instruction(state.get("external_context", ""))
 
         tools = [
             get_fundamentals,
@@ -41,7 +43,7 @@ def create_fundamentals_analyst(llm):
                     " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
                     " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                     " You have access to the following tools: {tool_names}.\n{system_message}"
-                    "For your reference, the current date is {current_date}. {instrument_context}",
+                    "For your reference, the current date is {current_date}. {instrument_context}{external_context}",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -51,6 +53,7 @@ def create_fundamentals_analyst(llm):
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)
+        prompt = prompt.partial(external_context=external_context)
 
         chain = prompt | llm.bind_tools(tools)
 
