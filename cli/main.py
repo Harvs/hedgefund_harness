@@ -26,6 +26,7 @@ from rich.rule import Rule
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.instruments import resolve_instrument, validate_coingecko_id
 from cli.models import AnalystType
 from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
@@ -499,15 +500,25 @@ def get_user_selections():
             box_content += f"\n[dim]Default: {default}[/dim]"
         return Panel(box_content, border_style="blue", padding=(1, 2))
 
+    asset_class = ask_asset_class()
+
     # Step 1: Ticker symbol
+    if asset_class == "crypto":
+        title = "Step 1: CoinGecko ID"
+        prompt = "Enter the exact CoinGecko id to analyze (examples: bitcoin, ethereum, solana)"
+        default_symbol = "bitcoin"
+    else:
+        title = "Step 1: Ticker Symbol"
+        prompt = "Enter the exact ticker symbol to analyze, including exchange suffix when needed (examples: SPY, CNC.TO, 7203.T, 0700.HK)"
+        default_symbol = "SPY"
     console.print(
         create_question_box(
-            "Step 1: Ticker Symbol",
-            "Enter the exact ticker symbol to analyze, including exchange suffix when needed (examples: SPY, CNC.TO, 7203.T, 0700.HK)",
-            "SPY",
+            title,
+            prompt,
+            default_symbol,
         )
     )
-    selected_ticker = get_ticker()
+    selected_ticker = get_ticker(asset_class)
 
     # Step 2: Analysis date
     default_date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -598,6 +609,7 @@ def get_user_selections():
 
     return {
         "ticker": selected_ticker,
+        "asset_class": asset_class,
         "analysis_date": analysis_date,
         "analysts": selected_analysts,
         "research_depth": selected_research_depth,
@@ -612,8 +624,23 @@ def get_user_selections():
     }
 
 
-def get_ticker():
+def ask_asset_class():
+    choice = typer.prompt("Asset class (equity/crypto)", default="equity").strip().lower()
+    while choice not in {"equity", "crypto"}:
+        console.print("[red]Error: Asset class must be 'equity' or 'crypto'[/red]")
+        choice = typer.prompt("Asset class (equity/crypto)", default="equity").strip().lower()
+    return choice
+
+
+def get_ticker(asset_class: str = "equity"):
     """Get ticker symbol from user input."""
+    if asset_class == "crypto":
+        while True:
+            value = typer.prompt("", default="bitcoin")
+            try:
+                return validate_coingecko_id(value)
+            except ValueError as exc:
+                console.print(f"[red]Error: {exc}[/red]")
     return typer.prompt("", default="SPY")
 
 
@@ -944,6 +971,7 @@ def run_analysis(checkpoint: bool = False):
     config["anthropic_effort"] = selections.get("anthropic_effort")
     config["output_language"] = selections.get("output_language", "English")
     config["checkpoint_enabled"] = checkpoint
+    config["asset_class"] = selections.get("asset_class", "equity")
 
     # Create stats callback handler for tracking LLM/tool calls
     stats_handler = StatsCallbackHandler()
@@ -959,6 +987,7 @@ def run_analysis(checkpoint: bool = False):
         debug=True,
         callbacks=[stats_handler],
     )
+    instrument = resolve_instrument(selections["ticker"], config)
 
     # Initialize message buffer with selected analysts
     message_buffer.init_for_analysis(selected_analyst_keys)
@@ -967,7 +996,7 @@ def run_analysis(checkpoint: bool = False):
     start_time = time.time()
 
     # Create result directory
-    results_dir = Path(config["results_dir"]) / selections["ticker"] / selections["analysis_date"]
+    results_dir = Path(config["results_dir"]) / instrument.safe_storage_key / selections["analysis_date"]
     results_dir.mkdir(parents=True, exist_ok=True)
     report_dir = results_dir / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
