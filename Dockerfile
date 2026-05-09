@@ -10,7 +10,13 @@ WORKDIR /build
 COPY . .
 RUN pip install --no-cache-dir .
 
-FROM python:3.12-slim
+FROM builder AS test
+
+RUN pip install --no-cache-dir pytest
+
+ENTRYPOINT ["python", "-m", "pytest"]
+
+FROM python:3.12-slim AS app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -18,16 +24,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-RUN useradd --create-home appuser
+RUN useradd --create-home appuser \
+    && mkdir -p /home/appuser/.tradingagents \
+    && chown -R appuser:appuser /home/appuser/.tradingagents
 USER appuser
 WORKDIR /home/appuser/app
 
 COPY --from=builder --chown=appuser:appuser /build .
 
 ENTRYPOINT ["tradingagents"]
-
-FROM builder AS test
-
-RUN pip install --no-cache-dir pytest
-
-ENTRYPOINT ["python", "-m", "pytest"]
