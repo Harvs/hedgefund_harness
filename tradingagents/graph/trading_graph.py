@@ -228,7 +228,7 @@ class TradingAgentsGraph:
         if updates:
             self.memory_log.batch_update_with_outcomes(updates)
 
-    def propagate(self, company_name, trade_date):
+    def propagate(self, company_name, trade_date, external_context: str = ""):
         """Run the trading agents graph for a company on a specific date.
 
         When ``checkpoint_enabled`` is set in config, the graph is recompiled
@@ -260,20 +260,20 @@ class TradingAgentsGraph:
                 logger.info("Starting fresh for %s on %s", instrument.safe_storage_key, trade_date)
 
         try:
-            return self._run_graph(instrument.identifier, trade_date, instrument.to_state())
+            return self._run_graph(instrument.identifier, trade_date, instrument.to_state(), external_context)
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
 
-    def _run_graph(self, company_name, trade_date, instrument=None):
+    def _run_graph(self, company_name, trade_date, instrument=None, external_context: str = ""):
         """Execute the graph and write the resulting state to disk and memory log."""
         # Initialize state — inject memory log context for PM.
         memory_key = (instrument or {}).get("safe_storage_key", company_name)
         past_context = self.memory_log.get_past_context(memory_key)
         init_agent_state = self.propagator.create_initial_state(
-            company_name, trade_date, past_context=past_context, instrument=instrument
+            company_name, trade_date, past_context=past_context, instrument=instrument, external_context=external_context
         )
         args = self.propagator.get_graph_args()
 
