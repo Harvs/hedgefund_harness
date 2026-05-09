@@ -67,7 +67,7 @@ TradingAgents is a multi-agent trading framework that mirrors the dynamics of re
 Our framework decomposes complex trading tasks into specialized roles. This ensures the system achieves a robust, scalable approach to market analysis and decision-making.
 
 ### Analyst Team
-- Fundamentals Analyst: Evaluates company financials and performance metrics, identifying intrinsic values and potential red flags.
+- Fundamentals Analyst: Evaluates company financials and performance metrics, identifying intrinsic values and potential red flags. For cryptocurrencies, analyzes tokenomics and on-chain metrics.
 - Sentiment Analyst: Analyzes social media and public sentiment using sentiment scoring algorithms to gauge short-term market mood.
 - News Analyst: Monitors global news and macroeconomic indicators, interpreting the impact of events on market conditions.
 - Technical Analyst: Utilizes technical indicators (like MACD and RSI) to detect trading patterns and forecast price movements.
@@ -132,6 +132,11 @@ For local models with Ollama:
 docker compose --profile ollama run --rm tradingagents-ollama
 ```
 
+For running tests:
+```bash
+docker compose --profile test run --rm tests
+```
+
 ### Required APIs
 
 TradingAgents supports multiple LLM providers. Set the API key for your chosen provider:
@@ -146,6 +151,7 @@ export DASHSCOPE_API_KEY=...       # Qwen (Alibaba DashScope)
 export ZHIPU_API_KEY=...           # GLM (Zhipu)
 export OPENROUTER_API_KEY=...      # OpenRouter
 export ALPHA_VANTAGE_API_KEY=...   # Alpha Vantage
+export COINGECKO_API_KEY=...        # CoinGecko (for cryptocurrency support)
 ```
 
 For enterprise providers (e.g. Azure OpenAI, AWS Bedrock), copy `.env.enterprise.example` to `.env.enterprise` and fill in your credentials.
@@ -212,6 +218,8 @@ config["llm_provider"] = "openai"        # openai, google, anthropic, xai, deeps
 config["deep_think_llm"] = "gpt-5.4"     # Model for complex reasoning
 config["quick_think_llm"] = "gpt-5.4-mini" # Model for quick tasks
 config["max_debate_rounds"] = 2
+config["asset_class"] = "equity"         # "equity" or "crypto"
+config["crypto_data_vendor"] = "coingecko"  # Data vendor for crypto assets
 
 ta = TradingAgentsGraph(debug=True, config=config)
 _, decision = ta.propagate("NVDA", "2026-01-15")
