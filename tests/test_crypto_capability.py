@@ -1,5 +1,6 @@
 import pandas as pd
 import pytest
+import requests
 
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.interface import route_to_vendor
@@ -65,6 +66,86 @@ def test_crypto_tokenomics_formatting(monkeypatch):
     assert "CoinGecko tokenomics" in report
     assert "Bitcoin" in report
     assert "Market cap" in report
+
+
+def test_crypto_tokenomics_rate_limit_returns_unavailable_message(monkeypatch):
+    from tradingagents.dataflows import coingecko
+
+    set_config({"asset_class": "crypto", "crypto_quote_currency": "usd"})
+
+    def raise_rate_limit(path, params):
+        raise coingecko.CoinGeckoDataError("CoinGecko rate limit exceeded. Retry later or set COINGECKO_API_KEY.")
+
+    monkeypatch.setattr(coingecko, "_get_json", raise_rate_limit)
+    report = coingecko.get_crypto_tokenomics("bitcoin", "2024-01-01")
+    assert "CoinGecko tokenomics data unavailable for 'bitcoin'" in report
+    assert "rate limit exceeded" in report
+
+
+def test_coingecko_no_key_retries_429_five_times(monkeypatch):
+    from tradingagents.dataflows import coingecko
+
+    class Response:
+        status_code = 429
+        ok = False
+        text = ""
+        headers = {}
+
+    calls = []
+    sleeps = []
+    set_config({"coingecko_api_key": None})
+    monkeypatch.delenv("COINGECKO_API_KEY", raising=False)
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: calls.append((args, kwargs)) or Response())
+    monkeypatch.setattr(coingecko.time, "sleep", sleeps.append)
+
+    with pytest.raises(coingecko.CoinGeckoDataError):
+        coingecko._get_json("/coins/bitcoin")
+
+    assert len(calls) == 5
+    assert sleeps == [1.0, 2.0, 4.0, 8.0]
+
+
+def test_coingecko_retry_after_header_controls_backoff(monkeypatch):
+    from tradingagents.dataflows import coingecko
+
+    class Response:
+        status_code = 429
+        ok = False
+        text = ""
+        headers = {"Retry-After": "3"}
+
+    sleeps = []
+    set_config({"coingecko_api_key": None})
+    monkeypatch.delenv("COINGECKO_API_KEY", raising=False)
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: Response())
+    monkeypatch.setattr(coingecko.time, "sleep", sleeps.append)
+
+    with pytest.raises(coingecko.CoinGeckoDataError):
+        coingecko._get_json("/coins/bitcoin")
+
+    assert sleeps == [3.0, 3.0, 3.0, 3.0]
+
+
+def test_coingecko_key_mode_retries_429_twice(monkeypatch):
+    from tradingagents.dataflows import coingecko
+
+    class Response:
+        status_code = 429
+        ok = False
+        text = ""
+        headers = {}
+
+    calls = []
+    sleeps = []
+    set_config({"coingecko_api_key": "demo-key"})
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: calls.append((args, kwargs)) or Response())
+    monkeypatch.setattr(coingecko.time, "sleep", sleeps.append)
+
+    with pytest.raises(coingecko.CoinGeckoDataError):
+        coingecko._get_json("/coins/bitcoin")
+
+    assert len(calls) == 2
+    assert sleeps == [1.0]
 
 
 def test_fetch_crypto_returns_benchmarks_non_btc_against_bitcoin(monkeypatch):

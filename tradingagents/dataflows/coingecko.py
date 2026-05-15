@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Dict, List
 
@@ -29,18 +30,54 @@ def _headers() -> Dict[str, str]:
     return headers
 
 
-def _get_json(path: str, params: Dict[str, Any] | None = None) -> Any:
+def _api_key() -> str | None:
+    config = get_config()
+    return config.get("coingecko_api_key") or os.getenv("COINGECKO_API_KEY")
+
+
+def _retry_after_seconds(response: requests.Response) -> float | None:
+    retry_after = response.headers.get("Retry-After")
+    if not retry_after:
+        return None
     try:
-        response = requests.get(f"{_api_base()}{path}", params=params or {}, headers=_headers(), timeout=30)
-    except requests.RequestException as exc:
-        raise CoinGeckoDataError(f"CoinGecko request failed: {exc}") from exc
-    if response.status_code == 429:
-        raise CoinGeckoDataError("CoinGecko rate limit exceeded. Retry later or set COINGECKO_API_KEY.")
-    if response.status_code == 404:
-        raise CoinGeckoDataError("CoinGecko id was not found. Use the exact CoinGecko coin id.")
-    if not response.ok:
-        raise CoinGeckoDataError(f"CoinGecko request failed with HTTP {response.status_code}: {response.text[:300]}")
-    return response.json()
+        return max(0.0, float(retry_after))
+    except ValueError:
+        return None
+
+
+def _retry_delay(attempt: int, response: requests.Response | None = None) -> float:
+    retry_after = _retry_after_seconds(response) if response is not None else None
+    if retry_after is not None:
+        return retry_after
+    return min(16.0, 2.0 ** attempt)
+
+
+def _get_json(path: str, params: Dict[str, Any] | None = None) -> Any:
+    max_attempts = 2 if _api_key() else 5
+    last_error: CoinGeckoDataError | None = None
+    for attempt in range(max_attempts):
+        try:
+            response = requests.get(f"{_api_base()}{path}", params=params or {}, headers=_headers(), timeout=30)
+        except requests.RequestException as exc:
+            last_error = CoinGeckoDataError(f"CoinGecko request failed: {exc}")
+            if attempt == max_attempts - 1:
+                raise last_error from exc
+            time.sleep(_retry_delay(attempt))
+            continue
+        if response.status_code == 429:
+            last_error = CoinGeckoDataError("CoinGecko rate limit exceeded. Retry later or set COINGECKO_API_KEY.")
+            if attempt == max_attempts - 1:
+                raise last_error
+            time.sleep(_retry_delay(attempt, response))
+            continue
+        if response.status_code == 404:
+            raise CoinGeckoDataError("CoinGecko id was not found. Use the exact CoinGecko coin id.")
+        if not response.ok:
+            raise CoinGeckoDataError(f"CoinGecko request failed with HTTP {response.status_code}: {response.text[:300]}")
+        return response.json()
+    if last_error is not None:
+        raise last_error
+    raise CoinGeckoDataError("CoinGecko request failed.")
 
 
 def _timestamp(date_text: str) -> int:
@@ -158,10 +195,13 @@ def get_crypto_tokenomics(
     coin_id = validate_coingecko_id(coin_id)
     datetime.strptime(curr_date, "%Y-%m-%d")
     quote_currency = str(get_config().get("crypto_quote_currency", "usd")).lower()
-    payload = _get_json(
-        f"/coins/{coin_id}",
-        {"localization": "false", "tickers": "false", "market_data": "true", "community_data": "false", "developer_data": "false", "sparkline": "false"},
-    )
+    try:
+        payload = _get_json(
+            f"/coins/{coin_id}",
+            {"localization": "false", "tickers": "false", "market_data": "true", "community_data": "false", "developer_data": "false", "sparkline": "false"},
+        )
+    except CoinGeckoDataError as exc:
+        return f"CoinGecko tokenomics data unavailable for '{coin_id}': {exc}"
     market = payload.get("market_data", {})
     rows = [
         ("CoinGecko id", payload.get("id")),
