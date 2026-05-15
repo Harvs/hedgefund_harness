@@ -264,6 +264,33 @@ def create_initial_state(..., external_context=""):
 
 `TradingAgentsGraph.propagate()` accepts `external_context` and forwards it to the propagator. The API wrapper should not overload the ticker/symbol field with extra context.
 
+## Equity Ticker Submission
+
+For `asset_class="equity"`, submit the exact ticker symbol expected by the configured market data vendor. The core preserves equity identifiers as submitted, so the API wrapper should normalize friendly user input before calling `TradingAgentsGraph.propagate()`.
+
+Recommended formats:
+
+```text
+US equities:          AAPL, MSFT, NVDA, TSLA, SPY
+Australian equities:  BHP.AX, CBA.AX, CSL.AX, WBC.AX
+Other examples:       CNC.TO, 7203.T, 0700.HK, BRK-B, ^GSPC
+```
+
+Do not pass company names, social-media cashtags, or exchange-prefixed symbols directly:
+
+```text
+$AAPL      -> AAPL
+$BHP.AX    -> BHP.AX
+ASX:BHP    -> BHP.AX
+NASDAQ:AAPL -> AAPL
+NYSE:IBM   -> IBM
+Apple      -> reject or resolve before calling the core
+```
+
+The wrapper should preserve exchange suffixes because they disambiguate non-US listings. For example, `BHP` and `BHP.AX` may resolve to different instruments depending on the vendor.
+
+The equity identifier may contain letters, digits, dot, dash, underscore, and caret. Reject or resolve values containing unsupported characters before submitting them to the graph.
+
 ## Context Formatting
 
 Create `tradingagents/api/context.py`:
@@ -378,11 +405,24 @@ Also consider stripping HTML and limiting each item length before passing to the
 
 ## API Docker Service
 
-Published app image:
+Published app image format:
 
 ```text
-192.168.0.8:5000/hedgefund-harness:0.2.5
-192.168.0.8:5000/hedgefund-harness:latest
+<registry-host>/<image-name>:<version>
+<registry-host>/<image-name>:latest
+```
+
+To rebuild and push the app image to your configured registry:
+
+```bash
+scripts/build-and-push.sh
+```
+
+Optional overrides:
+
+```bash
+VERSION=0.2.6 scripts/build-and-push.sh
+REGISTRY=<registry-host> IMAGE_NAME=hedgefund-harness VERSION=0.2.6 scripts/build-and-push.sh
 ```
 
 Add a FastAPI dependency to `pyproject.toml`:
@@ -396,7 +436,7 @@ Then add a Compose service:
 
 ```yaml
   tradingagents-api:
-    image: 192.168.0.8:5000/hedgefund-harness:0.2.5
+    image: <registry-host>/hedgefund-harness:0.2.5
     env_file:
       - .env
     environment:
