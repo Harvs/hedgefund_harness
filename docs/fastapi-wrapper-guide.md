@@ -418,11 +418,13 @@ To rebuild and push the app image to your configured registry:
 scripts/build-and-push.sh
 ```
 
+By default, the script tags the image with the first 12 characters of the built image ID and also pushes `latest`.
+
 Optional overrides:
 
 ```bash
-VERSION=0.2.6 scripts/build-and-push.sh
-REGISTRY=<registry-host> IMAGE_NAME=hedgefund-harness VERSION=0.2.6 scripts/build-and-push.sh
+VERSION=my-release-tag scripts/build-and-push.sh
+REGISTRY=<registry-host> IMAGE_NAME=hedgefund-harness scripts/build-and-push.sh
 ```
 
 Add a FastAPI dependency to `pyproject.toml`:
@@ -436,7 +438,7 @@ Then add a Compose service:
 
 ```yaml
   tradingagents-api:
-    image: <registry-host>/hedgefund-harness:0.2.5
+    image: <registry-host>/hedgefund-harness:<image-hash-tag>
     env_file:
       - .env
     environment:
